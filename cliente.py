@@ -1,6 +1,8 @@
 import socket
 import json
 import time
+# Librería añadida para implementar soporte de Cifrado TLS/SSL
+import ssl
 
 # --- CONFIGURACIÓN ---
 UDP_PORT = 5001
@@ -71,11 +73,42 @@ if __name__ == "__main__":
 
     # Paso 3: Conexión TCP
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    
+    # --- CONFIGURACIÓN SSL ---
+    # Creamos un contexto SSL por defecto.
+    context = ssl.create_default_context()
+    # Deshabilitar verificación del hostname y certificado 
+    # (Necesario porque estamos usando nuestros propios certificados autofirmados localmente)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+
     try:
         print(f"\n[CONECTANDO] Intentando conectar a {ip_servidor}:{TCP_PORT}...")
+        # Envolvemos nuestro socket conectándolo mediante TLS al nombre del servidor
+        client = context.wrap_socket(client, server_hostname=ip_servidor)
         client.connect((ip_servidor, TCP_PORT))
-        print("¡Conexión TCP Establecida!")
+        print("¡Conexión TCP Segura Establecida!")
         
+        # --- PASO 4: Autenticación ---
+        # Antes de proceder al menú de comandos estándar, solicitamos inicio de sesión
+        print("\n--- AUTENTICACIÓN ---")
+        user = input("Usuario: ")
+        pwd = input("Contraseña: ")
+        
+        # Enviamos un mensaje JSON modificado incluyendo nuestros datos.
+        auth_msg = {"accion": "AUTENTICAR", "user": user, "pass": pwd}
+        client.send(json.dumps(auth_msg).encode())
+        
+        # Recibimos el veredicto del servidor
+        auth_resp = client.recv(4096).decode()
+        print(f"Respuesta Servidor: {auth_resp}")
+        
+        # Si el servidor responde con "Error", matamos la ejecución del cliente aquí mismo
+        if "Error" in auth_resp:
+            print("Cerrando cliente por error de autenticación...")
+            client.close()
+            exit(1)
+            
         while True:
             opc = menu()
             mensaje = {}

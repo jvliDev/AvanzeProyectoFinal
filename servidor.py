@@ -1,15 +1,23 @@
-import socket
-import threading
-import json
 import subprocess
 import os
 import signal
+# Librerías añadidas para implementar seguridad (Cifrado y Hashing)
+import ssl
+import hashlib
 
 # --- CONFIGURACIÓN ---
 # Escuchar en todas las interfaces disponibles
 HOST = '0.0.0.0'
 TCP_PORT = 5000
 UDP_PORT = 5001
+
+# --- USUARIOS (Usuario: SHA256(Contraseña)) ---
+# admin : admin (hash)
+# Diccionario que simula una base de datos de usuarios. 
+# Las contraseñas están hasheadas con SHA-256 para no guardarlas en texto plano.
+USUARIOS = {
+    "admin": hashlib.sha256("admin".encode()).hexdigest()
+}
 
 # --- TAREA 3: DESCUBRIMIENTO (UDP) ---
 def responder_descubrimiento():
@@ -94,12 +102,33 @@ def ejecutar_orden(comando):
 # --- TAREA 2: SERVIDOR TCP ---
 def manejar_cliente(conn, addr):
     print(f"[CONEXIÓN] Cliente conectado desde {addr}")
+    # Variable de estado para controlar si el cliente actual inició sesión
+    autenticado = False
     while True:
         try:
             data = conn.recv(4096).decode()
             if not data: break
             
             comando = json.loads(data)
+            accion = comando.get("accion")
+            
+            # Verificar autenticación
+            if not autenticado:
+                # Si la acción en el JSON es AUTENTICAR, verificamos las credenciales
+                if accion == "AUTENTICAR":
+                    user = comando.get("user")
+                    pwd = comando.get("pass")
+                    # Hasehamos la contraseña recibida y la comparamos con nuestro 'diccionario'
+                    if user and pwd and user in USUARIOS and USUARIOS[user] == hashlib.sha256(pwd.encode()).hexdigest():
+                        autenticado = True
+                        conn.send("Autenticación Exitosa".encode())
+                    else:
+                        conn.send("Error: Credenciales inválidas".encode())
+                else:
+                    # Si intenta enviar otro comando sin iniciar sesión, devolvemos error.
+                    conn.send("Error: No autenticado. Por favor inicie sesión primero.".encode())
+                continue
+
             respuesta = ejecutar_orden(comando)
             conn.send(respuesta.encode())
         except:
@@ -117,9 +146,21 @@ if __name__ == "__main__":
     
     # Servidor principal TCP
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # Permite reutilizar el puerto (SO_REUSEADDR) para evitar el error "Address already in use"
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((HOST, TCP_PORT))
     server.listen()
     
+    # --- CONFIGURACIÓN SSL ---
+    # Creamos un contexto SSL configurado para actuar como Servidor
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    # Cargamos nuestros certificados autofirmados generados con OpenSSL
+    context.load_cert_chain(certfile="cert.pem", keyfile="key.pem")
+    
+    # Envolver el socket original TCP con una capa SSL
+    server_ssl = context.wrap_socket(server, server_side=True)
+    
     while True:
-        conn, addr = server.accept()
+        # Aceptamos las conexiones mediante nuestro nuevo socket envuelto en SSL
+        conn, addr = server_ssl.accept()
         threading.Thread(target=manejar_cliente, args=(conn, addr)).start()
