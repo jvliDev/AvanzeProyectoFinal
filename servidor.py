@@ -3,8 +3,8 @@ import os
 import signal
 # Librerías añadidas para implementar seguridad (Cifrado y Validación Shadow nativa de Linux)
 import ssl
-import crypt
 import spwd
+from passlib.hosts import linux_context
 
 # --- CONFIGURACIÓN ---
 # Escuchar en todas las interfaces disponibles
@@ -23,11 +23,9 @@ def validar_usuario_linux(username, password):
         entry = spwd.getspnam(username)
         # El hash cifrado real almacenado en el sistema
         hash_sistema = entry.sp_pwdp
-        # Usamos crypt para encriptar la contraseña que introdujo el cliente interactivo 
-        # usando la misma semilla/sal que el hash_sistema.
-        hash_calculado = crypt.crypt(password, hash_sistema)
-        # Si ambas coinciden, ¡La autenticación es idéntica a la que hace el login de Red Hat!
-        return hash_calculado == hash_sistema
+        # Usamos passlib para verificar la contraseña interactiva 
+        # contra el hash con sal de linux shadow ($y$, $6$, etc).
+        return linux_context.verify(password, hash_sistema)
     except KeyError:
         # El usuario no existe en esta máquina Linux
         return False
