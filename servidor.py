@@ -1,6 +1,9 @@
 import subprocess
 import os
 import signal
+import socket
+import threading
+import json
 # Librerías añadidas para implementar seguridad (Cifrado y Validación Shadow nativa de Linux)
 import ssl
 import spwd
