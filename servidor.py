@@ -1,9 +1,10 @@
 import subprocess
 import os
 import signal
-# Librerías añadidas para implementar seguridad (Cifrado y Hashing)
+# Librerías añadidas para implementar seguridad (Cifrado y Validación Shadow nativa de Linux)
 import ssl
-import hashlib
+import crypt
+import spwd
 
 # --- CONFIGURACIÓN ---
 # Escuchar en todas las interfaces disponibles
@@ -11,13 +12,28 @@ HOST = '0.0.0.0'
 TCP_PORT = 5000
 UDP_PORT = 5001
 
-# --- USUARIOS (Usuario: SHA256(Contraseña)) ---
-# admin : admin (hash)
-# Diccionario que simula una base de datos de usuarios. 
-# Las contraseñas están hasheadas con SHA-256 para no guardarlas en texto plano.
-USUARIOS = {
-    "admin": hashlib.sha256("admin".encode()).hexdigest()
-}
+# [NUEVO] --- VALIDACIÓN NATIVA CON LINUX ---
+def validar_usuario_linux(username, password):
+    """
+    Lee /etc/shadow para validar credenciales.
+    Nota: Python necesita ejecutarse con permisos root.
+    """
+    try:
+        # Obtiene la entrada de la base de contraseñas de Linux (/etc/shadow)
+        entry = spwd.getspnam(username)
+        # El hash cifrado real almacenado en el sistema
+        hash_sistema = entry.sp_pwdp
+        # Usamos crypt para encriptar la contraseña que introdujo el cliente interactivo 
+        # usando la misma semilla/sal que el hash_sistema.
+        hash_calculado = crypt.crypt(password, hash_sistema)
+        # Si ambas coinciden, ¡La autenticación es idéntica a la que hace el login de Red Hat!
+        return hash_calculado == hash_sistema
+    except KeyError:
+        # El usuario no existe en esta máquina Linux
+        return False
+    except PermissionError:
+        print("[ERROR CRÍTICO] ¡El servidor debe ejecutarse con permisos sudo/root para leer usuarios reales!")
+        return False
 
 # --- TAREA 3: DESCUBRIMIENTO (UDP) ---
 def responder_descubrimiento():
@@ -112,18 +128,18 @@ def manejar_cliente(conn, addr):
             comando = json.loads(data)
             accion = comando.get("accion")
             
-            # Verificar autenticación
+            # Verificar autenticación nativa de Red Hat
             if not autenticado:
-                # Si la acción en el JSON es AUTENTICAR, verificamos las credenciales
+                # Si la acción en el JSON es AUTENTICAR, verificamos las credenciales contra Linux
                 if accion == "AUTENTICAR":
                     user = comando.get("user")
                     pwd = comando.get("pass")
-                    # Hasehamos la contraseña recibida y la comparamos con nuestro 'diccionario'
-                    if user and pwd and user in USUARIOS and USUARIOS[user] == hashlib.sha256(pwd.encode()).hexdigest():
+                    # Pasamos los datos del cliente a la validación de contraseñas de Linux
+                    if user and pwd and validar_usuario_linux(user, pwd):
                         autenticado = True
-                        conn.send("Autenticación Exitosa".encode())
+                        conn.send("Autenticación Exitosa. Sesión validada por Linux.".encode())
                     else:
-                        conn.send("Error: Credenciales inválidas".encode())
+                        conn.send("Error: Credenciales inválidas o servidor sin permisos root.".encode())
                 else:
                     # Si intenta enviar otro comando sin iniciar sesión, devolvemos error.
                     conn.send("Error: No autenticado. Por favor inicie sesión primero.".encode())
