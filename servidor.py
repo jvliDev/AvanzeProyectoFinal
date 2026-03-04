@@ -63,7 +63,7 @@ def obtener_procesos_nativos():
     try:
         # Ejecutamos 'ps -e' para ver todos los procesos
         # -o pid,comm,stat: Solo queremos PID, Nombre y Estado
-        cmd = ["ps", "-e", "-o", "pid,comm,stat"]
+        cmd = ["ps", "-e", "--sort=-pid", "-o", "pid,comm,stat"]
         salida = subprocess.check_output(cmd).decode()
         
         lista = []
